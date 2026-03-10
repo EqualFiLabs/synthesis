@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.3  
+**Status:** Canonical Draft v1.4  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -31,9 +31,10 @@ All four products must share:
 
 1. **One canonical framework** across money-credit and compute-credit.
 2. **Deterministic state transitions** for request, approval, draw, repay, delinquency, default, resolution.
-3. **Composable with Position NFTs** and module encumbrance.
+3. **Composable with Position NFTs** and native encumbrance rails.
 4. **Capital-efficient for lenders** while preserving solvency boundaries.
 5. **Simple to implement in current Diamond architecture.**
+6. **No module dependency** in canonical financing invariants (module bridging is optional).
 
 ---
 
@@ -86,6 +87,9 @@ struct FinancingProposal {
     ProposalType proposalType;
     string agentRegistry;         // ERC-8004 coordinate: {namespace}:{chainId}:{identityRegistry}
     uint256 agentId;
+    uint256 borrowerPositionId;   // Position NFT anchor for borrower obligations
+    uint256 lenderPositionId;     // solo only (0 for pooled)
+    uint256 fundingPoolId;        // pool supplying financing liquidity
     address settlementAsset;      // e.g. USDC for accounting/repayment
     uint256 requestedAmount;      // money-denominated cap for Agentic products
     uint256 requestedUnits;       // compute units cap for Compute products
@@ -131,6 +135,11 @@ struct FinancingAgreement {
     uint256 proposalId;
     string agentRegistry;         // ERC-8004 coordinate: {namespace}:{chainId}:{identityRegistry}
     uint256 agentId;
+    uint256 borrowerPositionId;
+    uint256 lenderPositionId;     // solo only (0 for pooled)
+    bytes32 borrowerPositionKey;
+    bytes32 lenderPositionKey;    // solo only (0x0 for pooled)
+    uint256 fundingPoolId;
     AgreementMode mode;
     AgreementStatus status;
 
@@ -143,6 +152,10 @@ struct FinancingAgreement {
     uint256 principalRepaid;
     uint256 interestAccrued;
     uint256 feesAccrued;
+
+    // Native encumbrance tracking
+    uint256 principalEncumbered;
+    uint256 unitsEncumbered;
 
     // Payment schedule
     uint256 minPaymentPerPeriod;
@@ -173,12 +186,16 @@ struct FinancingAgreement {
 }
 ```
 
-### 4.4 Capital Backing + Encumbrance
+### 4.4 Capital Backing + Native Encumbrance
 
 - Backing capital remains represented inside Equalis accounting.
 - Drawn capital is tracked as explicit utilization against agreement limits.
-- Encumbered backing continues through existing module accounting rails.
-- `LibModuleEncumbrance`, `LibActiveCreditIndex`, and solvency checks remain the canonical mechanism.
+- Encumbered backing is tracked through **native encumbrance rails** (not module-required paths).
+- Canonical mechanism for financing encumbrance is:
+  - `LibEncumbrance`
+  - `LibActiveCreditIndex`
+  - `LibSolvencyChecks`
+- Module accounting MAY mirror financing state for optional integrations, but canonical financing correctness MUST NOT depend on module registry state.
 
 ### 4.5 Repayment Routing
 
@@ -244,7 +261,21 @@ ACP execution venues are adapter-selected and MUST remain portable.
 - Venue-specific logic MUST be isolated to adapter contracts.
 - No single venue (including Virtuals) may become a required dependency for protocol correctness.
 - Canonical no-lock-in adapter profile is defined in:
-  - `specs/virtuals-adapter-spec.md`
+  - `specs/agentic-financing/virtuals-adapter-spec.md`
+
+### 4.10 Native Encumbrance Namespace
+
+Agentic financing reserves a dedicated native encumbrance namespace.
+
+```solidity
+bytes32 constant AGENTIC_ENCUMBRANCE_NAMESPACE = keccak256("equalis.agentic.encumbrance.v1");
+```
+
+Rules:
+- Financing encumbrance is tracked per agreement and position key in native storage.
+- Core transitions (`draw`, `repay`, `default`, `writeoff`, `refund`) MUST mutate native encumbrance deterministically.
+- Module pause/inactive states MUST NOT block canonical financing accounting transitions.
+- Optional module bridges MAY read native encumbrance and mirror it, but never become source-of-truth.
 
 ---
 
@@ -473,6 +504,7 @@ event ProposalApproved(uint256 indexed proposalId, address indexed approver);
 event ProposalRejected(uint256 indexed proposalId, address indexed rejector);
 event AgreementActivated(uint256 indexed agreementId, uint256 indexed proposalId, AgreementMode mode);
 event DrawExecuted(uint256 indexed agreementId, uint256 amount, uint256 units, address recipient);
+event NativeEncumbranceUpdated(uint256 indexed agreementId, bytes32 indexed positionKey, uint256 principalEncumbered, uint256 unitsEncumbered, bytes32 reason);
 event RepaymentApplied(uint256 indexed agreementId, uint256 amount, uint256 toFees, uint256 toInterest, uint256 toPrincipal);
 event AgreementDelinquent(uint256 indexed agreementId, uint256 pastDue);
 event AgreementDefaulted(uint256 indexed agreementId, uint256 pastDue);
@@ -536,14 +568,15 @@ event ValidationRecorded(uint256 indexed agreementId, bytes32 indexed requestHas
 
 ### 12.3 Existing Integrations
 
-- `LibModuleEncumbrance`
+- `LibEncumbrance` (canonical financing encumbrance)
 - `LibActiveCreditIndex`
 - `LibFeeRouter`
 - `LibPositionNFT`
 - `LibSolvencyChecks`
 - ERC-8183 adapter interface (`IACP8183Adapter`)
 - ERC-8004 identity/reputation/validation adapters (`IERC8004IdentityAdapter`, `IERC8004ReputationAdapter`, `IERC8004ValidationAdapter`)
-- Companion no-lock-in venue profile for Virtuals route: `specs/virtuals-adapter-spec.md`
+- Companion no-lock-in venue profile for Virtuals route: `specs/agentic-financing/virtuals-adapter-spec.md`
+- Optional bridge only: `LibModuleEncumbrance` mirror path (non-canonical)
 
 ### 12.4 ERC-8183 Adapter Interface (Canonical)
 
@@ -628,7 +661,7 @@ interface IACPAdapterRegistry {
 Notes:
 - `venueKey` SHOULD be deterministic (`keccak256("VIRTUALS_ACP_BASE")`, etc.)
 - Registry + agreement venue mapping MUST allow future non-Virtuals ERC-8183 adapters without storage migration.
-- Virtuals adapter MUST comply with no-lock-in profile in `specs/virtuals-adapter-spec.md`.
+- Virtuals adapter MUST comply with no-lock-in profile in `specs/agentic-financing/virtuals-adapter-spec.md`.
 
 ---
 
@@ -674,6 +707,12 @@ struct AgenticStorage {
     mapping(uint256 => int128) agreementLastReputationValue;       // agreementId => latest posted value
     mapping(uint256 => uint8) agreementLastReputationDecimals;     // agreementId => decimals
 
+    // Native encumbrance state (canonical)
+    mapping(uint256 => uint256) agreementPrincipalEncumbered;      // agreementId => settlement principal encumbered
+    mapping(uint256 => uint256) agreementUnitsEncumbered;          // agreementId => compute units encumbered
+    mapping(uint256 => bytes32) agreementBorrowerPositionKey;      // agreementId => borrower position key
+    mapping(uint256 => bytes32) agreementLenderPositionKey;        // agreementId => lender position key (0x0 for pooled)
+
     // Compute metering
     mapping(bytes32 => ComputeUnitConfig) computeUnits;
     mapping(uint256 => mapping(bytes32 => uint256)) agreementUnitUsage;
@@ -696,6 +735,7 @@ struct AgenticStorage {
 - Default `TrustMode`: **DiscoveryOnly**
 - Validation-required agreements use ERC-8004 `response >= 80` by default (unless overridden)
 - ACP venue routing is registry-based (`venueKey -> adapter`), defaulting to governance-selected portable adapter key
+- Native encumbrance rails are canonical for financing accounting; module mirrors are optional
 - ACP-linked expired refunds (`claimRefund`) are always available (non-pausable)
 - No-lock-in rule: no hardcoded venue/token dependency in canonical financing logic
 - Global circuit-breaker authority: governance/timelock
@@ -712,27 +752,30 @@ Superseded documents are archived and removed from active spec surface:
 
 Any future updates to shared financing/risk/accounting invariants must modify this canonical file directly.
 
-Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/virtuals-adapter-spec.md`).
+Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/agentic-financing/virtuals-adapter-spec.md`).
 
 ---
 
 ## 16) Implementation Sequence
 
 1. Implement storage + proposal lifecycle facets.
-2. Implement solo approval + activation + revolving repayment.
-3. Implement pooled voting + pooled activation.
-4. Add compute metering layer (solo then pooled).
-5. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
-6. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
-7. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/virtuals-adapter-spec.md`).
-8. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
-9. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
-10. Add delinquency/default/write-off logic.
-11. Add full test matrix:
+2. Implement native encumbrance ledger + position-key anchoring for agreements.
+3. Implement solo approval + activation + revolving repayment.
+4. Implement pooled voting + pooled activation.
+5. Add compute metering layer (solo then pooled).
+6. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
+7. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
+8. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
+9. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
+10. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
+11. Add delinquency/default/write-off logic.
+12. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
+13. Add full test matrix:
    - unit
    - fuzz
    - invariant
    - cross-product accounting invariants
+   - native encumbrance conservation + position transfer continuity
    - ACP terminal-state accounting synchronization
    - trust-mode gating + validation threshold enforcement
    - differential portability tests across >=2 ERC-8183 adapters
@@ -747,10 +790,12 @@ Companion integration documents are allowed when they do not override canonical 
 - ACP-linked job terminal states synchronize correctly to agreement accounting.
 - ERC-8004 identity resolution is deterministic (`agentWallet` then `ownerOf` fallback).
 - Trust modes (`DiscoveryOnly/ReputationOnly/ValidationRequired/Hybrid`) gate transitions correctly.
+- Native encumbrance is source-of-truth for financing balances and remains consistent across state transitions.
+- Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
 - Differential tests show identical core accounting outcomes across at least two ERC-8183 adapters.
 - Accounting invariants hold under stress and default cases.
 
 ---
 
-**End of Canonical Spec v1.3**
+**End of Canonical Spec v1.4**

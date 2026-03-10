@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.1  
 **Date:** 2026-03-10  
-**Applies to:** `specs/agentic-financing-spec.md` (Canonical v1.2)
+**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.4)
 
 ---
 
@@ -13,6 +13,7 @@ Define a Virtuals integration path that enables Equalis Agentic Financing to rou
 This adapter is a venue connector, not a business-logic owner.
 
 Core financing logic (proposals, agreements, accounting, risk, trust policy) remains in Equalis.
+Native encumbrance remains source-of-truth for financing balances; adapters only synchronize execution lifecycle.
 
 ---
 
@@ -201,6 +202,7 @@ No venue-specific deviation is allowed.
 - [ ] Adapter is selected by generic `venueKey`, not hardcoded address in core.
 - [ ] At least one mock/alt ERC-8183 adapter passes same integration tests.
 - [ ] Agreement accounting tests pass identically across adapter implementations.
+- [ ] Core financing accounting remains valid when module subsystem is paused or absent.
 
 ---
 
