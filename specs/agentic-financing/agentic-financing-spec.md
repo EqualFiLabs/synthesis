@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.6  
+**Status:** Canonical Draft v1.7  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -169,6 +169,12 @@ struct FinancingAgreement {
     uint16 liquidationPenaltyBps;
     uint16 writeOffThresholdBps;
 
+    // Lender-protection covenant (net draw coverage)
+    uint16 minNetDrawCoverageBps;  // e.g. 10000 = payment must at least match net draw component
+    uint256 principalFloorPerPeriod;
+    uint32 covenantCurePeriod;
+    bool drawTerminated;           // once set, new draws are permanently disabled for this agreement
+
     // Metadata
     bytes32 termsHash;
     bool pooled;
@@ -278,6 +284,27 @@ Rules:
 - Module pause/inactive states MUST NOT block canonical financing accounting transitions.
 - Optional module bridges MAY read native encumbrance and mirror it, but never become source of truth.
 
+### 4.11 Net Draw Coverage Covenant (Lender Protection)
+
+Each agreement MAY enforce a periodic payment-vs-draw covenant.
+
+For period `p`:
+
+- `grossDraw_p` = total draws in period
+- `refunds_p` = total refunds/reversals in period (including ACP reject/expired paths)
+- `netDraw_p = max(0, grossDraw_p - refunds_p)`
+
+Required minimum payment for the period:
+
+`requiredPayment_p = feesDue_p + interestDue_p + (netDraw_p * minNetDrawCoverageBps / 10000) + principalFloorPerPeriod`
+
+Rules:
+- `minNetDrawCoverageBps` MUST be `>= 10000` for protected agreements.
+- If `actualPayment_p < requiredPayment_p`, covenant is breached.
+- On first breach: mark delinquent and freeze new draws immediately.
+- If breach remains unresolved past `covenantCurePeriod`: terminate draw rights (`drawTerminated = true`) and transition to default workflow.
+- Repayments and refunds remain callable after draw termination.
+
 ---
 
 ## 5) State Machines
@@ -308,15 +335,23 @@ Defaulted -> Closed (if fully recovered)
 
 ### 5.3 Delinquency Logic
 
-Given:
+Base payment delinquency:
 - `periodsElapsed`
 - `requiredCumulative = periodsElapsed * minPaymentPerPeriod`
 - `actualCumulative` applied via waterfall
+- `pastDue = max(0, requiredCumulative - actualCumulative)`
+
+Coverage covenant delinquency (when enabled):
+- compute `requiredPayment_p` using Section 4.11
+- `coverageShortfall_p = max(0, requiredPayment_p - actualPayment_p)`
 
 Then:
-- `pastDue = max(0, requiredCumulative - actualCumulative)`
-- If `pastDue > 0` after due boundary: `Delinquent`
-- If still `pastDue > 0` after `gracePeriod`: `Defaulted`
+- If `pastDue > 0` or `coverageShortfall_p > 0` after due boundary: `Delinquent`
+- On covenant breach, new draws are frozen immediately.
+- If breach remains unresolved past `covenantCurePeriod` (or `gracePeriod` when larger):
+  - set `drawTerminated = true`
+  - transition to `Defaulted`
+- `Delinquent -> Active` only if all shortfalls are cured.
 
 ---
 
@@ -415,6 +450,8 @@ Each usage event:
 - add to principal/usage debt ledger
 - optional provider surcharge as fee component
 
+For compute-heavy agreements, covenant periods SHOULD be short (e.g. 7 days) rather than monthly to prevent fast negative carry accumulation.
+
 ### 8.5 Provider Strategy (No-Lock-In)
 
 Compute providers are routed through adapter abstraction and are never canonical sources of truth.
@@ -483,10 +520,11 @@ Trust synchronization logic must be deterministic and auditable from on-chain ev
 
 On `Defaulted`:
 1. Freeze new draws
-2. Keep repayments open
-3. Apply penalty schedule
-4. Attempt recovery from configured sources
-5. If unresolved past threshold, move to `WrittenOff`
+2. If covenant breach caused default, permanently terminate draw rights (`drawTerminated = true`)
+3. Keep repayments and refunds open
+4. Apply penalty schedule
+5. Attempt recovery from configured sources
+6. If unresolved past threshold, move to `WrittenOff`
 
 ### 10.2 Write-Off Accounting
 
@@ -519,6 +557,9 @@ event DrawExecuted(uint256 indexed agreementId, uint256 amount, uint256 units, a
 event NativeEncumbranceUpdated(uint256 indexed agreementId, bytes32 indexed positionKey, uint256 principalEncumbered, uint256 unitsEncumbered, bytes32 reason);
 event RepaymentApplied(uint256 indexed agreementId, uint256 amount, uint256 toFees, uint256 toInterest, uint256 toPrincipal);
 event AgreementDelinquent(uint256 indexed agreementId, uint256 pastDue);
+event CoverageCovenantBreached(uint256 indexed agreementId, uint256 indexed periodId, uint256 requiredPayment, uint256 actualPayment, uint256 netDraw);
+event CoverageCovenantCured(uint256 indexed agreementId, uint256 indexed periodId, uint256 curePayment);
+event DrawRightsTerminated(uint256 indexed agreementId, bytes32 reason);
 event AgreementDefaulted(uint256 indexed agreementId, uint256 pastDue);
 event AgreementWrittenOff(uint256 indexed agreementId, uint256 writeOffAmount);
 
@@ -732,6 +773,13 @@ struct AgenticStorage {
     // Payment tracking
     mapping(uint256 => uint256) cumulativePayments;
     mapping(uint256 => uint40) lastAccrualAt;
+
+    // Net draw coverage covenant tracking
+    mapping(uint256 => uint256) agreementCurrentPeriodId;          // agreementId => rolling period id
+    mapping(uint256 => mapping(uint256 => uint256)) periodGrossDraw;    // agreementId => periodId => gross draw
+    mapping(uint256 => mapping(uint256 => uint256)) periodRefunds;      // agreementId => periodId => refunds/reversals
+    mapping(uint256 => mapping(uint256 => uint256)) periodPayments;     // agreementId => periodId => applied payments
+    mapping(uint256 => uint8) agreementCovenantStrikes;            // agreementId => unresolved breach count
 }
 ```
 
@@ -742,6 +790,10 @@ struct AgenticStorage {
 - Repayment split: **70/30** (lender/protocol rail)
 - Minimum grace period: **3 days**
 - Maximum grace period: **30 days**
+- Default `minNetDrawCoverageBps`: **10500** (pay 105% of period net draw component)
+- Default `principalFloorPerPeriod`: **non-zero governance value** (asset-specific)
+- Default `covenantCurePeriod`: **7 days**
+- Compute agreements SHOULD use shorter `paymentInterval` defaults (e.g. **7 days**)
 - Pooled quorum default: **20%**
 - Pooled pass threshold default: **55%**
 - Default `TrustMode`: **DiscoveryOnly**
@@ -784,14 +836,16 @@ Companion integration documents are allowed when they do not override canonical 
 12. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
 13. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
 14. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
-15. Add delinquency/default/write-off logic.
-16. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
-17. Add full test matrix:
+15. Implement net draw coverage covenant evaluation + draw freeze/termination actions.
+16. Add delinquency/default/write-off logic.
+17. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
+18. Add full test matrix:
    - unit
    - fuzz
    - invariant
    - cross-product accounting invariants
    - native encumbrance conservation + position transfer continuity
+   - net draw coverage covenant enforcement (breach, cure, draw termination)
    - compute adapter accounting parity across >=2 providers
    - ACP terminal-state accounting synchronization
    - trust-mode gating + validation threshold enforcement
@@ -808,6 +862,7 @@ Companion integration documents are allowed when they do not override canonical 
 - ERC-8004 identity resolution is deterministic (`agentWallet` then `ownerOf` fallback).
 - Trust modes (`DiscoveryOnly/ReputationOnly/ValidationRequired/Hybrid`) gate transitions correctly.
 - Native encumbrance is source of truth for financing balances and remains consistent across state transitions.
+- Net draw coverage covenant is enforced deterministically (breach -> draw freeze -> cure or terminated draws/default).
 - Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
 - Compute provider routing is hot-swappable via adapter policy without core storage migration.
@@ -816,4 +871,4 @@ Companion integration documents are allowed when they do not override canonical 
 
 ---
 
-**End of Canonical Spec v1.6**
+**End of Canonical Spec v1.7**
