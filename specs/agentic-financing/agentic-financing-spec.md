@@ -1,10 +1,10 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.4  
+**Status:** Canonical Draft v1.5  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
-- `specs/angentic-financing-current.md`
+- `specs/agentic-financing-current.md`
 - `specs/compute-credit-spec.md`
 
 ---
@@ -60,6 +60,7 @@ All four products must share:
   1. `getAgentWallet(agentId)` when set
   2. fallback to identity registry `ownerOf(agentId)` when wallet is unset
 - Authoritative borrower address is the resolved wallet at execution time (not cached indefinitely).
+- Deployment profile note: v1 assumes one canonical identity registry per deployment environment; multi-registry indexing MAY be added later via hashed agent keys.
 
 ### 4.2 Proposal Primitive
 
@@ -273,9 +274,9 @@ bytes32 constant AGENTIC_ENCUMBRANCE_NAMESPACE = keccak256("equalis.agentic.encu
 
 Rules:
 - Financing encumbrance is tracked per agreement and position key in native storage.
-- Core transitions (`draw`, `repay`, `default`, `writeoff`, `refund`) MUST mutate native encumbrance deterministically.
+- Core transitions (`draw`, `repay`, `default`, `write-off`, `refund`) MUST mutate native encumbrance deterministically.
 - Module pause/inactive states MUST NOT block canonical financing accounting transitions.
-- Optional module bridges MAY read native encumbrance and mirror it, but never become source-of-truth.
+- Optional module bridges MAY read native encumbrance and mirror it, but never become source of truth.
 
 ---
 
@@ -677,8 +678,8 @@ struct AgenticStorage {
     mapping(uint256 => FinancingProposal) proposals;
     mapping(uint256 => FinancingAgreement) agreements;
 
-    mapping(uint256 => uint256[]) agentToProposals;     // agentId => proposalIds
-    mapping(uint256 => uint256[]) agentToAgreements;    // agentId => agreementIds
+    mapping(uint256 => uint256[]) agentToProposals;     // agentId (canonical registry profile) => proposalIds
+    mapping(uint256 => uint256[]) agentToAgreements;    // agentId (canonical registry profile) => agreementIds
 
     // Solo lender linkage
     mapping(address => uint256[]) lenderToProposals;
@@ -747,7 +748,7 @@ struct AgenticStorage {
 This file is the single source of truth.
 
 Superseded documents are archived and removed from active spec surface:
-- `specs/angentic-financing-current.md`
+- `specs/agentic-financing-current.md`
 - `specs/compute-credit-spec.md`
 
 Any future updates to shared financing/risk/accounting invariants must modify this canonical file directly.
@@ -790,7 +791,7 @@ Companion integration documents are allowed when they do not override canonical 
 - ACP-linked job terminal states synchronize correctly to agreement accounting.
 - ERC-8004 identity resolution is deterministic (`agentWallet` then `ownerOf` fallback).
 - Trust modes (`DiscoveryOnly/ReputationOnly/ValidationRequired/Hybrid`) gate transitions correctly.
-- Native encumbrance is source-of-truth for financing balances and remains consistent across state transitions.
+- Native encumbrance is source of truth for financing balances and remains consistent across state transitions.
 - Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
 - Differential tests show identical core accounting outcomes across at least two ERC-8183 adapters.
@@ -798,4 +799,4 @@ Companion integration documents are allowed when they do not override canonical 
 
 ---
 
-**End of Canonical Spec v1.4**
+**End of Canonical Spec v1.5**

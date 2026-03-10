@@ -1,8 +1,8 @@
 # Equalis Virtuals ACP Adapter Specification (No-Lock-In)
 
-**Status:** Draft v0.1  
+**Status:** Draft v0.2  
 **Date:** 2026-03-10  
-**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.4)
+**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.5)
 
 ---
 
@@ -13,7 +13,7 @@ Define a Virtuals integration path that enables Equalis Agentic Financing to rou
 This adapter is a venue connector, not a business-logic owner.
 
 Core financing logic (proposals, agreements, accounting, risk, trust policy) remains in Equalis.
-Native encumbrance remains source-of-truth for financing balances; adapters only synchronize execution lifecycle.
+Native encumbrance remains source of truth for financing balances; adapters only synchronize execution lifecycle.
 
 ---
 
@@ -247,4 +247,4 @@ Expected: identical core accounting and risk outcomes.
 
 ---
 
-**End of Draft v0.1**
+**End of Draft v0.2**
