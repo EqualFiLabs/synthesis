@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.8  
+**Status:** Canonical Draft v1.9  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -601,6 +601,11 @@ event DrawRightsTerminated(uint256 indexed agreementId, bytes32 reason);
 event AgreementDefaulted(uint256 indexed agreementId, uint256 pastDue);
 event AgreementWrittenOff(uint256 indexed agreementId, uint256 writeOffAmount);
 
+// Credential Handoff (Agentic Mailbox)
+event AgentEncPubRegistered(address indexed agentWallet, bytes pubkey);
+event BorrowerPayloadPublished(uint256 indexed agreementId, address indexed borrower, bytes envelope);
+event ProviderPayloadPublished(uint256 indexed agreementId, address indexed provider, bytes envelope);
+
 // ERC-8183 linkage + lifecycle sync
 // terminalState: 1=Completed, 2=Rejected, 3=Expired
 event ACPJobLinked(uint256 indexed agreementId, uint256 indexed acpJobId, address indexed adapter);
@@ -633,6 +638,10 @@ event ValidationRecorded(uint256 indexed agreementId, bytes32 indexed requestHas
   - activate agreements, draw, repay, close
 - `ComputeUsageFacet`
   - register metered usage, provider adapter hooks
+- `AgentEncPubRegistryFacet`
+  - secp256k1 public key registry for agent secure messaging
+- `AgenticMailboxFacet`
+  - per-agreement encrypted payload slots for credential handoff
 - `ACPAdapterFacet`
   - ERC-8183 job creation/linking/funding/submission/resolution sync
 - `AdapterRegistryFacet`
