@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.7  
+**Status:** Canonical Draft v1.8  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -35,6 +35,7 @@ All four products must share:
 4. **Capital-efficient for lenders** while preserving solvency boundaries.
 5. **Simple to implement in current Diamond architecture.**
 6. **No module dependency** in canonical financing invariants (module bridging is optional).
+7. **Optional collateralization toggle** for lender protection without forcing capital lock on all agreements.
 
 ---
 
@@ -91,6 +92,12 @@ struct FinancingProposal {
     uint256 borrowerPositionId;   // Position NFT anchor for borrower obligations
     uint256 lenderPositionId;     // solo only (0 for pooled)
     uint256 fundingPoolId;        // pool supplying financing liquidity
+
+    // Optional collateral profile
+    bool collateralEnabled;
+    uint16 minCollateralRatioBps; // required at activation when collateralEnabled=true
+    address collateralAsset;      // 0x0 means position-native collateral only
+
     address settlementAsset;      // e.g. USDC for accounting/repayment
     uint256 requestedAmount;      // money-denominated cap for Agentic products
     uint256 requestedUnits;       // compute units cap for Compute products
@@ -168,6 +175,14 @@ struct FinancingAgreement {
     uint16 reserveBps;
     uint16 liquidationPenaltyBps;
     uint16 writeOffThresholdBps;
+
+    // Optional collateral profile (toggle)
+    bool collateralEnabled;
+    address collateralAsset;        // 0x0 means position-native collateral only
+    uint16 minCollateralRatioBps;   // activation requirement when collateralEnabled=true
+    uint16 maintenanceCollateralRatioBps;
+    uint256 collateralPosted;
+    uint256 collateralSeized;
 
     // Lender-protection covenant (net draw coverage)
     uint16 minNetDrawCoverageBps;  // e.g. 10000 = payment must at least match net draw component
@@ -305,6 +320,20 @@ Rules:
 - If breach remains unresolved past `covenantCurePeriod`: terminate draw rights (`drawTerminated = true`) and transition to default workflow.
 - Repayments and refunds remain callable after draw termination.
 
+### 4.12 Optional Collateralization Toggle
+
+Collateralization is optional and policy-driven.
+
+- If `collateralEnabled=false`, agreement runs covenant-only risk controls.
+- If `collateralEnabled=true`, agreement must satisfy `minCollateralRatioBps` at activation.
+- Collateral is a first-loss buffer and does **not** disable covenant checks.
+- Collateral MAY be position-native or asset-denominated depending on policy.
+- Collateral shortfall freezes new draws; unresolved shortfall transitions through delinquency/default workflow.
+
+Design intent:
+- preserve borrower utility in default path (no mandatory collateral across all agreements)
+- allow lenders/pools to demand stronger protection on selected agreements
+
 ---
 
 ## 5) State Machines
@@ -345,9 +374,13 @@ Coverage covenant delinquency (when enabled):
 - compute `requiredPayment_p` using Section 4.11
 - `coverageShortfall_p = max(0, requiredPayment_p - actualPayment_p)`
 
+Collateral delinquency (when collateralEnabled=true):
+- compute live collateral ratio from policy-defined valuation source
+- `collateralShortfall = (collateralRatio < maintenanceCollateralRatioBps)`
+
 Then:
-- If `pastDue > 0` or `coverageShortfall_p > 0` after due boundary: `Delinquent`
-- On covenant breach, new draws are frozen immediately.
+- If `pastDue > 0` or `coverageShortfall_p > 0` or `collateralShortfall` after due boundary: `Delinquent`
+- On covenant breach or collateral shortfall, new draws are frozen immediately.
 - If breach remains unresolved past `covenantCurePeriod` (or `gracePeriod` when larger):
   - set `drawTerminated = true`
   - transition to `Defaulted`
@@ -523,8 +556,9 @@ On `Defaulted`:
 2. If covenant breach caused default, permanently terminate draw rights (`drawTerminated = true`)
 3. Keep repayments and refunds open
 4. Apply penalty schedule
-5. Attempt recovery from configured sources
-6. If unresolved past threshold, move to `WrittenOff`
+5. If `collateralEnabled=true`, apply collateral seizure path up to policy limits
+6. Attempt recovery from remaining configured sources
+7. If unresolved past threshold, move to `WrittenOff`
 
 ### 10.2 Write-Off Accounting
 
@@ -557,6 +591,10 @@ event DrawExecuted(uint256 indexed agreementId, uint256 amount, uint256 units, a
 event NativeEncumbranceUpdated(uint256 indexed agreementId, bytes32 indexed positionKey, uint256 principalEncumbered, uint256 unitsEncumbered, bytes32 reason);
 event RepaymentApplied(uint256 indexed agreementId, uint256 amount, uint256 toFees, uint256 toInterest, uint256 toPrincipal);
 event AgreementDelinquent(uint256 indexed agreementId, uint256 pastDue);
+event CollateralProfileSet(uint256 indexed agreementId, bool collateralEnabled, address collateralAsset, uint16 minCollateralRatioBps, uint16 maintenanceCollateralRatioBps);
+event CollateralPosted(uint256 indexed agreementId, address indexed asset, uint256 amount, bytes32 sourcePositionKey);
+event CollateralReleased(uint256 indexed agreementId, address indexed asset, uint256 amount, bytes32 targetPositionKey);
+event CollateralSeized(uint256 indexed agreementId, address indexed asset, uint256 amount, bytes32 reason);
 event CoverageCovenantBreached(uint256 indexed agreementId, uint256 indexed periodId, uint256 requiredPayment, uint256 actualPayment, uint256 netDraw);
 event CoverageCovenantCured(uint256 indexed agreementId, uint256 indexed periodId, uint256 curePayment);
 event DrawRightsTerminated(uint256 indexed agreementId, bytes32 reason);
@@ -766,6 +804,12 @@ struct AgenticStorage {
     mapping(uint256 => bytes32) agreementBorrowerPositionKey;      // agreementId => borrower position key
     mapping(uint256 => bytes32) agreementLenderPositionKey;        // agreementId => lender position key (0x0 for pooled)
 
+    // Optional collateral tracking
+    mapping(uint256 => uint256) agreementCollateralPosted;          // agreementId => total posted collateral amount
+    mapping(uint256 => uint256) agreementCollateralSeized;          // agreementId => cumulative seized collateral
+    mapping(uint256 => uint16) agreementLastCollateralRatioBps;     // agreementId => latest evaluated collateral ratio
+    mapping(uint256 => uint40) agreementLastCollateralCheckAt;      // agreementId => latest collateral ratio checkpoint
+
     // Compute metering
     mapping(bytes32 => ComputeUnitConfig) computeUnits;
     mapping(uint256 => mapping(bytes32 => uint256)) agreementUnitUsage;
@@ -793,6 +837,10 @@ struct AgenticStorage {
 - Default `minNetDrawCoverageBps`: **10500** (pay 105% of period net draw component)
 - Default `principalFloorPerPeriod`: **non-zero governance value** (asset-specific)
 - Default `covenantCurePeriod`: **7 days**
+- Default `collateralEnabled`: **false**
+- When collateral is enabled:
+  - default `minCollateralRatioBps`: **11000**
+  - default `maintenanceCollateralRatioBps`: **10500**
 - Compute agreements SHOULD use shorter `paymentInterval` defaults (e.g. **7 days**)
 - Pooled quorum default: **20%**
 - Pooled pass threshold default: **55%**
@@ -837,15 +885,17 @@ Companion integration documents are allowed when they do not override canonical 
 13. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
 14. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
 15. Implement net draw coverage covenant evaluation + draw freeze/termination actions.
-16. Add delinquency/default/write-off logic.
-17. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
-18. Add full test matrix:
+16. Implement optional collateral toggle flows (post/release/seize + collateral-ratio checks).
+17. Add delinquency/default/write-off logic.
+18. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
+19. Add full test matrix:
    - unit
    - fuzz
    - invariant
    - cross-product accounting invariants
    - native encumbrance conservation + position transfer continuity
    - net draw coverage covenant enforcement (breach, cure, draw termination)
+   - optional collateral toggle invariants (post/release/seize and no-forced-collateral paths)
    - compute adapter accounting parity across >=2 providers
    - ACP terminal-state accounting synchronization
    - trust-mode gating + validation threshold enforcement
@@ -863,6 +913,7 @@ Companion integration documents are allowed when they do not override canonical 
 - Trust modes (`DiscoveryOnly/ReputationOnly/ValidationRequired/Hybrid`) gate transitions correctly.
 - Native encumbrance is source of truth for financing balances and remains consistent across state transitions.
 - Net draw coverage covenant is enforced deterministically (breach -> draw freeze -> cure or terminated draws/default).
+- Optional collateral toggle works deterministically and does not become a mandatory dependency for agreement activation.
 - Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
 - Compute provider routing is hot-swappable via adapter policy without core storage migration.
@@ -871,4 +922,4 @@ Companion integration documents are allowed when they do not override canonical 
 
 ---
 
-**End of Canonical Spec v1.7**
+**End of Canonical Spec v1.8**
