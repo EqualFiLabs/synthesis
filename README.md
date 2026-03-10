@@ -13,6 +13,7 @@ specs/
   agentic-financing/
     agentic-financing-spec.md
     virtuals-adapter-spec.md
+    compute-provider-decision-spec.md
 ```
 
 ### 1) `agentic-financing-spec.md`
@@ -28,6 +29,13 @@ It defines shared primitives, state machines, accounting, risk transitions, ERC-
 No-lock-in adapter profile for routing ERC-8183 job execution through Virtuals-compatible ACP venues.
 
 This adapter spec is intentionally written so Virtuals can be integrated **without becoming a required dependency** of core protocol logic.
+
+### 3) `compute-provider-decision-spec.md`
+Provider-selection and sequencing spec for compute financing adapters.
+
+It defines weighted evaluation criteria and the current no-lock-in rollout order:
+- Lambda-first for dedicated-capacity financing
+- RunPod-first for burst/serverless financing
 
 ---
 

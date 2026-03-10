@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.5  
+**Status:** Canonical Draft v1.6  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -415,6 +415,17 @@ Each usage event:
 - add to principal/usage debt ledger
 - optional provider surcharge as fee component
 
+### 8.5 Provider Strategy (No-Lock-In)
+
+Compute providers are routed through adapter abstraction and are never canonical sources of truth.
+
+- Dedicated capacity financing path: Lambda-first
+- Burst/serverless financing path: RunPod-first
+- Routing and fallback are policy-configurable and reversible via adapter allowlists
+
+Detailed scoring and integration sequencing are defined in:
+- `specs/agentic-financing/compute-provider-decision-spec.md`
+
 ---
 
 ## 9) Product D — Pooled Compute/Inference Lending
@@ -753,7 +764,7 @@ Superseded documents are archived and removed from active spec surface:
 
 Any future updates to shared financing/risk/accounting invariants must modify this canonical file directly.
 
-Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/agentic-financing/virtuals-adapter-spec.md`).
+Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/agentic-financing/virtuals-adapter-spec.md`, `specs/agentic-financing/compute-provider-decision-spec.md`).
 
 ---
 
@@ -764,19 +775,24 @@ Companion integration documents are allowed when they do not override canonical 
 3. Implement solo approval + activation + revolving repayment.
 4. Implement pooled voting + pooled activation.
 5. Add compute metering layer (solo then pooled).
-6. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
-7. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
-8. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
-9. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
-10. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
-11. Add delinquency/default/write-off logic.
-12. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
-13. Add full test matrix:
+6. Implement compute provider adapter abstraction + routing policy.
+7. Implement `LambdaComputeAdapter` for dedicated-capacity financing.
+8. Implement `RunPodComputeAdapter` for burst/serverless financing.
+9. Add differential compute adapter tests for accounting parity.
+10. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
+11. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
+12. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
+13. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
+14. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
+15. Add delinquency/default/write-off logic.
+16. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
+17. Add full test matrix:
    - unit
    - fuzz
    - invariant
    - cross-product accounting invariants
    - native encumbrance conservation + position transfer continuity
+   - compute adapter accounting parity across >=2 providers
    - ACP terminal-state accounting synchronization
    - trust-mode gating + validation threshold enforcement
    - differential portability tests across >=2 ERC-8183 adapters
@@ -794,9 +810,10 @@ Companion integration documents are allowed when they do not override canonical 
 - Native encumbrance is source of truth for financing balances and remains consistent across state transitions.
 - Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
-- Differential tests show identical core accounting outcomes across at least two ERC-8183 adapters.
+- Compute provider routing is hot-swappable via adapter policy without core storage migration.
+- Differential tests show identical core accounting outcomes across at least two compute provider adapters and at least two ERC-8183 adapters.
 - Accounting invariants hold under stress and default cases.
 
 ---
 
-**End of Canonical Spec v1.5**
+**End of Canonical Spec v1.6**

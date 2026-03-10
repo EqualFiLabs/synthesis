@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.2  
 **Date:** 2026-03-10  
-**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.5)
+**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.6)
 
 ---
 
