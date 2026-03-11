@@ -1,7 +1,7 @@
 # Compute Provider Decision Spec (No-Lock-In)
 
-**Status:** Draft v0.2  
-**Date:** 2026-03-10  
+**Status:** Draft v0.3  
+**Date:** 2026-03-11  
 **Applies to:** `specs/agentic-financing/agentic-financing-spec.md`
 
 ---
@@ -120,14 +120,14 @@ Score profile:
 
 There is no single provider that is best for all compute financing products.
 
-### 5.2 Recommended strategy
+### 5.2 Recommended strategy (Hackathon execution profile)
 
-- **Primary rail (Phase 1): Lambda adapter** for financed dedicated instances
-- **Secondary rail (Phase 2): RunPod adapter** for financed burst/serverless inference
-- **Tertiary rail (Phase 3): Venice adapter** for financed API-based inference
+- **Primary rail (Phase 1): Venice adapter** for financed API-based inference and initial sponsor-aligned launch
+- **Secondary rail (Phase 2): Lambda adapter** for financed dedicated instances
+- **Tertiary rail (Phase 3): RunPod adapter** for financed burst/serverless inference
 - Keep all rails behind one canonical compute adapter boundary
 
-This satisfies no-lock-in while matching each provider to its strongest product surface.
+This satisfies no-lock-in while prioritizing fastest deployable rail for hackathon delivery.
 
 ---
 
@@ -141,29 +141,30 @@ Define canonical compute adapter interface and event schema:
 - release/terminate/revoke
 - error normalization
 
-### Phase 1 — LambdaComputeAdapter (primary)
-Implement dedicated-instance financing path:
-- deterministic debt accrual from instance pricing + measured usage windows
-- hard policy bounds (max runtime, max spend, region/type allowlists)
-
-### Phase 2 — RunPodComputeAdapter (secondary)
-Implement burst/serverless financing path:
-- queue-job funding windows
-- sync/async settlement mapping
-- bounded TTL and retry semantics into debt model
-
-### Phase 3 — VeniceComputeAdapter (managed API inference)
+### Phase 1 — VeniceComputeAdapter (hackathon primary)
 Implement key-scoped inference financing path:
 - per-agreement API key create/update/delete
 - consumption limits + expiry tied to agreement policy
 - billing/usage normalization into canonical unit types
 - revoke/limit-clamp kill switch on delinquency/default
 
+### Phase 2 — LambdaComputeAdapter (secondary)
+Implement dedicated-instance financing path:
+- deterministic debt accrual from instance pricing + measured usage windows
+- hard policy bounds (max runtime, max spend, region/type allowlists)
+
+### Phase 3 — RunPodComputeAdapter (tertiary)
+Implement burst/serverless financing path:
+- queue-job funding windows
+- sync/async settlement mapping
+- bounded TTL and retry semantics into debt model
+
 ### Phase 4 — Router + policy scheduler
 Route by agreement policy:
-- `DedicatedCapacity` -> Lambda first
-- `BurstInference` -> RunPod first
-- `ApiCreditInference` -> Venice first
+- Hackathon default: route all compute financing to Venice unless explicitly overridden
+- Production target: `DedicatedCapacity` -> Lambda first
+- Production target: `BurstInference` -> RunPod first
+- Production target: `ApiCreditInference` -> Venice first
 - fallback path only through approved adapter allowlist
 
 ---
@@ -182,9 +183,12 @@ Must pass before mainnet release:
 
 ## 8) Canonical Policy Defaults (v1)
 
-- Default dedicated-capacity provider: **Lambda**
-- Default burst-inference provider: **RunPod**
-- Default API-credit inference provider: **Venice**
+- Hackathon default dedicated-capacity provider: **Venice** (temporary)
+- Hackathon default burst-inference provider: **Venice** (temporary)
+- Hackathon default API-credit inference provider: **Venice**
+- Production target dedicated-capacity provider: **Lambda**
+- Production target burst-inference provider: **RunPod**
+- Production target API-credit inference provider: **Venice**
 - Provider routing is governance-configurable and reversible
 - Any provider-level fail-open behavior is forbidden; all failures must resolve to explicit agreement state transitions
 
@@ -198,4 +202,4 @@ Must pass before mainnet release:
 
 ---
 
-**End of Draft v0.2**
+**End of Draft v0.3**

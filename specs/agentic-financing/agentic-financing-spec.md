@@ -1,7 +1,7 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.10  
-**Date:** 2026-03-10  
+**Status:** Canonical Draft v1.11  
+**Date:** 2026-03-11  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
 - `specs/agentic-financing-current.md`
@@ -492,6 +492,7 @@ Compute providers are routed through adapter abstraction and are never canonical
 - Dedicated capacity financing path: Lambda-first
 - Burst/serverless financing path: RunPod-first
 - Managed API inference financing path: Venice-first
+- Hackathon delivery override: Venice-first for initial integration/launch sequencing
 - Routing and fallback are policy-configurable and reversible via adapter allowlists
 
 Detailed scoring and integration sequencing are defined in:
@@ -887,9 +888,9 @@ Companion integration documents are allowed when they do not override canonical 
 4. Implement pooled voting + pooled activation.
 5. Add compute metering layer (solo then pooled).
 6. Implement compute provider adapter abstraction + routing policy.
-7. Implement `LambdaComputeAdapter` for dedicated-capacity financing.
-8. Implement `RunPodComputeAdapter` for burst/serverless financing.
-9. Implement `VeniceComputeAdapter` for managed API inference financing (`specs/agentic-financing/venice-adapter-spec.md`).
+7. Implement `VeniceComputeAdapter` for managed API inference financing (`specs/agentic-financing/venice-adapter-spec.md`).
+8. Implement `LambdaComputeAdapter` for dedicated-capacity financing.
+9. Implement `RunPodComputeAdapter` for burst/serverless financing.
 10. Add differential compute adapter tests for accounting parity.
 11. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
 12. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
@@ -934,4 +935,4 @@ Companion integration documents are allowed when they do not override canonical 
 
 ---
 
-**End of Canonical Spec v1.10**
+**End of Canonical Spec v1.11**
