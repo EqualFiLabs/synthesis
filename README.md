@@ -14,6 +14,9 @@ specs/
     agentic-financing-spec.md
     virtuals-adapter-spec.md
     compute-provider-decision-spec.md
+    compute-orchestration-spec.md
+    mailbox-sdk-spec.md
+    venice-adapter-spec.md
 ```
 
 ### 1) `agentic-financing-spec.md`
@@ -36,6 +39,13 @@ Provider-selection and sequencing spec for compute financing adapters.
 It defines weighted evaluation criteria and the current no-lock-in rollout order:
 - Lambda-first for dedicated-capacity financing
 - RunPod-first for burst/serverless financing
+- Venice adapter for managed API-based inference financing
+
+### 4) `venice-adapter-spec.md`
+No-lock-in adapter profile for integrating Venice as a managed inference compute rail.
+
+Defines per-agreement API key lifecycle, mailbox credential handoff, billing-to-unit normalization,
+and kill-switch revocation behavior under delinquency/default transitions.
 
 ---
 

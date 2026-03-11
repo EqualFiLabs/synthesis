@@ -1,22 +1,22 @@
 # Compute Orchestration Node Specification
 
-**Status:** Draft v0.2  
+**Status:** Draft v0.3  
 **Date:** 2026-03-10  
-**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.8) and `compute-provider-decision-spec.md`
+**Applies to:** `specs/agentic-financing/agentic-financing-spec.md` (Canonical v1.10), `compute-provider-decision-spec.md`, and `venice-adapter-spec.md`
 
 ---
 
 ## 1) Purpose
 
-The **Compute Orchestration Node** is the trusted off-chain relayer that bridges the deterministic Equalis smart contracts to the non-deterministic Web2 APIs of compute providers (Lambda, RunPod).
+The **Compute Orchestration Node** is the trusted off-chain relayer that bridges deterministic Equalis contracts to non-deterministic provider APIs (Lambda, RunPod, Venice).
 
 It is responsible for:
-1. Translating on-chain agreement activations into live hardware/endpoints.
-2. Securely exchanging access credentials with the borrowing agent via on-chain encrypted mailboxes.
+1. Translating on-chain agreement activations into live compute access.
+2. Securely exchanging credentials/config with the borrowing agent via on-chain encrypted mailbox flows.
 3. Metering off-chain usage and posting it on-chain to accrue debt.
-4. Enforcing on-chain risk transitions (delinquency/covenant breach) by tearing down off-chain resources.
+4. Enforcing on-chain risk transitions (delinquency/covenant breach/default) by terminating/revoking off-chain access.
 
-This node is the sole trusted party holding the provider API keys and the relayer wallet private keys.
+This node is the sole trusted party holding provider admin/API credentials and the relayer wallet private keys.
 
 ---
 
@@ -24,18 +24,16 @@ This node is the sole trusted party holding the provider API keys and the relaye
 
 The node runs as a persistent service with four core subsystems:
 
-1. **Ingestion Engine:** Listens to RPC endpoints for Equalis canonical events.
-2. **Provider Client:** Interacts with Lambda Labs and RunPod APIs.
-3. **Relayer/Submitter:** Signs and broadcasts `registerUsage()` and `publishProviderPayload()` transactions to the blockchain.
-4. **State Database:** A local mapping of `agreementId <-> providerInstanceId <-> billingState` to handle RPC drops and provider API outages cleanly.
+1. **Ingestion Engine:** Listens to RPC endpoints for canonical Equalis events.
+2. **Provider Clients:** Provider-specific clients for Lambda, RunPod, Venice.
+3. **Relayer/Submitter:** Signs and broadcasts `registerUsage()` and `publishProviderPayload()` transactions.
+4. **State Database:** Local mapping of `agreementId <-> providerResourceId <-> billingState` for outage/replay safety.
 
 ---
 
 ## 3) The Ingestion Engine (Listening)
 
-The node must subscribe to the Equalis smart contract events to drive the state machine.
-
-### Trigger Events:
+### Trigger Events
 - `AgreementActivated(agreementId, proposalId, mode)`
 - `BorrowerPayloadPublished(agreementId, envelope)`
 - `CoverageCovenantBreached(agreementId, ...)`
@@ -43,88 +41,137 @@ The node must subscribe to the Equalis smart contract events to drive the state 
 - `AgreementDefaulted(agreementId, pastDue)`
 - `AgreementClosed(agreementId)`
 
-### Handling Logic:
-- **Idempotency:** The ingestion engine must store the `blockNumber` and `logIndex` of processed events to survive restarts without double-provisioning or double-terminating.
-- **Filtering:** Only process `AgreementActivated` events where the agreement involves the `ComputeUsageFacet`.
+### Handling Logic
+- **Idempotency:** Store `blockNumber` + `logIndex` for every processed event.
+- **Filtering:** Only process compute-linked agreements.
+- **Ordering:** Enforce deterministic local transition ordering when events arrive from reorg-prone windows.
 
 ---
 
-## 4) Credential Handoff (The On-Chain Mailbox)
+## 4) Credential Handoff (On-Chain Mailbox)
 
-Credential handoff is entirely on-chain, utilizing Diamond facets adapted from the EqualX Atomic Mailbox architecture. This removes the need for IPFS or centralized secret passing.
+Credential handoff is on-chain using:
+- `AgentEncPubRegistryFacet` (agent encryption public key registry)
+- `AgenticMailboxFacet` (per-agreement encrypted payload channel)
 
-### 4.1 Required Facets
-- **`AgentEncPubRegistryFacet`**: Allows agents (via ERC-8004 wallets) to register their compressed secp256k1 encryption public keys.
-- **`AgenticMailboxFacet`**: An encrypted, per-agreement message board.
+### 4.1 Required flow
+1. Agent registers encryption pubkey.
+2. Agent publishes borrower payload after activation.
+3. Orchestration node provisions provider resources / scoped credentials.
+4. Orchestration node encrypts provider payload to borrower and publishes on-chain.
+5. Borrower decrypts and consumes provider access details.
 
-### 4.2 The Handoff Flow
-1. **Agent Registration:** Before proposing compute, the borrowing agent registers their encryption public key in the `AgentEncPubRegistryFacet`.
-2. **Borrower Payload (The Request):** Upon `AgreementActivated`, the borrowing agent posts their own SSH public key (for Lambda) or environment config to the `AgenticMailboxFacet` via `publishBorrowerPayload(agreementId, envelope)`.
-3. **Provisioning (The Node):** 
-   - The Orchestration Node detects `BorrowerPayloadPublished`.
-   - The node provisions the hardware on Lambda/RunPod, injecting the borrower's provided SSH key/config directly.
-4. **Provider Payload (The Delivery):**
-   - The node retrieves the instance IP address or generated RunPod API token.
-   - The node fetches the borrower's public encryption key from the registry.
-   - The node encrypts the connection details and posts them back via `publishProviderPayload(agreementId, envelope)`.
-5. **Consumption:** The borrowing agent decrypts the payload and connects to their compute.
+Compatibility requirement (`mailbox-sdk-spec.md` v0.2):
+- mailbox events carry `bytes envelope`
+- envelope bytes MUST decode to a UTF-8 stringified ECIES envelope (`iv/ephemPublicKey/ciphertext/mac`)
+- decrypt path MUST call `decryptPayload(privateKey, envelopeString)`
 
-*Security Note: The Orchestration Node never generates or holds the private SSH key used to access the Lambda instance. The agent generates it and passes the public key in.*
+Security invariant:
+- Node never publishes plaintext secrets on-chain.
 
 ---
 
-## 5) Provisioning & The Provider Client
+## 5) Provisioning & Provider Clients
 
-Triggered by the `BorrowerPayloadPublished` event.
+Triggered by `BorrowerPayloadPublished`.
 
 ### 5.1 Lambda (Dedicated Capacity)
-- **Action:** POST to `/v1/instances`
-- **Mapping:** Map the on-chain `unitType` (e.g., `GPU_A100_1X`) to the Lambda `instance_type` (e.g., `gpu_1x_a100_sxm4`).
-- **Injection:** Pass the decoded SSH public key from the borrower's payload into the `ssh_key_names` or startup script payload.
-- **State Update:** Save the returned `instance_id` to the local database, linked to the `agreementId`.
+- Create instance (`/v1/instances` path).
+- Map canonical `unitType -> instance_type`.
+- Inject borrower SSH public key into instance config.
+- Persist `instance_id` in local state.
 
 ### 5.2 RunPod (Burst Inference)
-- **Action:** POST to `/v2/graphql` to create a Serverless endpoint or Pod.
-- **State Update:** Save the `pod_id` or `endpoint_id`. Connect the endpoint details into the `providerPayload`.
+- Create endpoint/pod through GraphQL API.
+- Persist `pod_id` / `endpoint_id` in local state.
+- Publish endpoint/token details via mailbox.
+
+### 5.3 Venice (Managed API Inference)
+- Create scoped INFERENCE API key (`POST /api_keys`) with policy limits.
+- Optional: validate model policy against `/models`.
+- Persist `apiKeyId` + non-secret metadata.
+- Publish encrypted provider payload containing:
+  - `baseUrl` (`https://api.venice.ai/api/v1`)
+  - scoped API key
+  - expiry/consumption limits
+  - model policy metadata
+
+Security rule:
+- plaintext API key lifetime in memory should be minimal and never logged.
 
 ---
 
-## 6) Metering Relayer (The Oracle)
+## 6) Metering Relayer (Usage Oracle)
 
-Compute financing relies on metered usage converting into on-chain debt. The node acts as the oracle for this conversion.
+Compute financing requires metered off-chain usage to become on-chain debt.
 
-### Flow:
-1. **Polling:** A cron worker runs periodically (e.g., every 1 hour).
-2. **Provider Query:** 
-   - **Lambda:** Query `/v1/instances/{id}` to verify the instance is `active`. Calculate the hours elapsed since the last poll.
-   - **RunPod:** Query the billing/usage API for inference tokens consumed by the specific endpoint/pod.
-3. **Transaction Batching:** The node packages the usage deltas into a `registerUsage(agreementId, unitType, amount)` payload.
-4. **On-Chain Submission:** The node signs and broadcasts the transaction to the Equalis `ComputeUsageFacet`.
-5. **Reconciliation:** Upon successful transaction confirmation, the node updates its local database to mark those units as "billed on-chain."
+### Flow
+1. Cron worker runs periodically (e.g., 15m–1h depending on agreement policy).
+2. Provider query:
+   - **Lambda:** instance status + elapsed runtime windows.
+   - **RunPod:** endpoint/pod usage / inference telemetry.
+   - **Venice:** `GET /billing/usage` with pagination/time windows.
+3. Normalize provider rows into canonical `unitType` deltas.
+4. Batch `registerUsage(agreementId, unitType, amount)` submissions.
+5. Update local reconciliation state after confirmation.
 
----
-
-## 7) Enforcement (The Kill Switch)
-
-If a borrower fails to meet their payment covenants, the on-chain risk transitions must immediately halt the off-chain compute.
-
-### Triggers:
-- `CoverageCovenantBreached`
-- `DrawRightsTerminated`
-- `AgreementDefaulted`
-
-### Flow:
-1. **Ingestion:** The node detects one of the trigger events for a tracked `agreementId`.
-2. **Lookup:** The node retrieves the associated `providerInstanceId` from the local database.
-3. **Execution:**
-   - **Lambda:** POST to `/v1/instances/{id}/terminate`.
-   - **RunPod:** Execute the GraphQL mutation to terminate the pod/endpoint.
-4. **Final Metering:** The node performs one final usage calculation up to the exact moment of termination and submits a final `registerUsage()` transaction to capture all outstanding debt.
-5. **State Update:** The `agreementId` is marked as `terminated` in the local database.
-
-### Edge Case Handling:
-- **Provider API Outage:** If the terminate call fails (e.g., 500 error from Lambda), the node must queue the request and retry with exponential backoff. The on-chain draw rights are already frozen, so no *new* debt is authorized, but the hardware must be stopped to prevent unrecoverable leakage.
+### Replay safety
+- Every metering row gets a deterministic digest for dedupe.
+- High-watermark checkpoints are persisted per agreement.
 
 ---
 
-**End of Draft v0.2**
+## 7) Enforcement (Kill Switch)
+
+On risk triggers (`CoverageCovenantBreached`, `DrawRightsTerminated`, `AgreementDefaulted`), the node must stop off-chain spend quickly.
+
+### Flow
+1. Detect trigger event.
+2. Lookup provider resource linkage from local state.
+3. Execute provider shutdown/revocation:
+   - **Lambda:** terminate instance.
+   - **RunPod:** terminate pod/endpoint.
+   - **Venice:** clamp key limit to zero, set immediate expiry, revoke key (`DELETE /api_keys`).
+4. Perform final metering sync up to stop/revoke boundary.
+5. Mark agreement as terminated in local state.
+
+### Edge handling
+- Provider outage -> enqueue retries with exponential backoff + jitter.
+- On-chain draw rights are already frozen, but off-chain resource stop/revoke must continue until confirmed.
+
+---
+
+## 8) Local State Model (Minimum)
+
+- Agreement linkage:
+  - `agreementId`
+  - `providerType` (`lambda|runpod|venice`)
+  - `providerResourceId` (`instance_id|pod_id|apiKeyId`)
+- Metering checkpoint:
+  - `lastSyncedAt`
+  - `lastDigest`
+  - provider cursor/page marker
+- Enforcement status:
+  - `active|termination_pending|terminated`
+
+---
+
+## 9) Operational Requirements
+
+- Rate-limit-aware provider clients (especially billing/list endpoints).
+- Structured logs with request correlation IDs (`CF-RAY` for Venice when available).
+- Dead-letter queues for failed metering and failed shutdown tasks.
+- Alerting for prolonged `termination_pending` states.
+
+---
+
+## 10) Success Criteria
+
+- End-to-end activation -> provisioning -> mailbox delivery works across all enabled provider adapters.
+- Metering submissions are deterministic and idempotent.
+- Kill-switch reliably halts new off-chain spend for delinquent/defaulted agreements.
+- Provider outages do not corrupt canonical on-chain accounting.
+
+---
+
+**End of Draft v0.3**

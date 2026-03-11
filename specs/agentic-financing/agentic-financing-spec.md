@@ -1,6 +1,6 @@
 # Equalis Agentic Financing — Canonical Specification
 
-**Status:** Canonical Draft v1.9  
+**Status:** Canonical Draft v1.10  
 **Date:** 2026-03-10  
 **Protocol:** Equalis (EqualFi)  
 **Replaces:**
@@ -491,10 +491,12 @@ Compute providers are routed through adapter abstraction and are never canonical
 
 - Dedicated capacity financing path: Lambda-first
 - Burst/serverless financing path: RunPod-first
+- Managed API inference financing path: Venice-first
 - Routing and fallback are policy-configurable and reversible via adapter allowlists
 
 Detailed scoring and integration sequencing are defined in:
 - `specs/agentic-financing/compute-provider-decision-spec.md`
+- `specs/agentic-financing/venice-adapter-spec.md`
 
 ---
 
@@ -873,7 +875,7 @@ Superseded documents are archived and removed from active spec surface:
 
 Any future updates to shared financing/risk/accounting invariants must modify this canonical file directly.
 
-Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/agentic-financing/virtuals-adapter-spec.md`, `specs/agentic-financing/compute-provider-decision-spec.md`).
+Companion integration documents are allowed when they do not override canonical invariants (e.g. `specs/agentic-financing/virtuals-adapter-spec.md`, `specs/agentic-financing/compute-provider-decision-spec.md`, `specs/agentic-financing/venice-adapter-spec.md`, `specs/agentic-financing/compute-orchestration-spec.md`).
 
 ---
 
@@ -887,17 +889,18 @@ Companion integration documents are allowed when they do not override canonical 
 6. Implement compute provider adapter abstraction + routing policy.
 7. Implement `LambdaComputeAdapter` for dedicated-capacity financing.
 8. Implement `RunPodComputeAdapter` for burst/serverless financing.
-9. Add differential compute adapter tests for accounting parity.
-10. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
-11. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
-12. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
-13. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
-14. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
-15. Implement net draw coverage covenant evaluation + draw freeze/termination actions.
-16. Implement optional collateral toggle flows (post/release/seize + collateral-ratio checks).
-17. Add delinquency/default/write-off logic.
-18. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
-19. Add full test matrix:
+9. Implement `VeniceComputeAdapter` for managed API inference financing (`specs/agentic-financing/venice-adapter-spec.md`).
+10. Add differential compute adapter tests for accounting parity.
+11. Implement ACP adapter registry + per-agreement venue routing (`venueKey`).
+12. Implement ERC-8183 adapter linkage + ACP lifecycle sync accounting.
+13. Implement `VirtualsACPAdapter` under no-lock-in profile (`specs/agentic-financing/virtuals-adapter-spec.md`).
+14. Implement at least one alternate/mock generic ERC-8183 adapter for portability verification.
+15. Implement ERC-8004 adapters (identity/reputation/validation) + trust-mode gates.
+16. Implement net draw coverage covenant evaluation + draw freeze/termination actions.
+17. Implement optional collateral toggle flows (post/release/seize + collateral-ratio checks).
+18. Add delinquency/default/write-off logic.
+19. Optional: implement module mirror bridge from native encumbrance state (must be non-canonical).
+20. Add full test matrix:
    - unit
    - fuzz
    - invariant
@@ -905,7 +908,7 @@ Companion integration documents are allowed when they do not override canonical 
    - native encumbrance conservation + position transfer continuity
    - net draw coverage covenant enforcement (breach, cure, draw termination)
    - optional collateral toggle invariants (post/release/seize and no-forced-collateral paths)
-   - compute adapter accounting parity across >=2 providers
+   - compute adapter accounting parity across >=2 providers (including >=1 API-based inference adapter)
    - ACP terminal-state accounting synchronization
    - trust-mode gating + validation threshold enforcement
    - differential portability tests across >=2 ERC-8183 adapters
@@ -926,9 +929,9 @@ Companion integration documents are allowed when they do not override canonical 
 - Financing correctness does not depend on module registry pause/inactive states.
 - ACP execution venue is hot-swappable via registry (`venueKey`) without core storage migration.
 - Compute provider routing is hot-swappable via adapter policy without core storage migration.
-- Differential tests show identical core accounting outcomes across at least two compute provider adapters and at least two ERC-8183 adapters.
+- Differential tests show identical core accounting outcomes across at least two compute provider adapters (including an API-inference adapter such as Venice) and at least two ERC-8183 adapters.
 - Accounting invariants hold under stress and default cases.
 
 ---
 
-**End of Canonical Spec v1.8**
+**End of Canonical Spec v1.10**

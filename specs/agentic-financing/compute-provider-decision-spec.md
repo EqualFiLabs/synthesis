@@ -1,6 +1,6 @@
 # Compute Provider Decision Spec (No-Lock-In)
 
-**Status:** Draft v0.1  
+**Status:** Draft v0.2  
 **Date:** 2026-03-10  
 **Applies to:** `specs/agentic-financing/agentic-financing-spec.md`
 
@@ -8,11 +8,12 @@
 
 ## 1) Purpose
 
-Select the best initial compute provider integration strategy for Agentic Financing while preserving the hard constraint:
+Select the best initial compute provider integration strategy for Agentic Financing while preserving hard constraints:
 
 - **No lock-in**
 - **Adapter-only coupling**
 - **Native encumbrance remains source of truth**
+- **Deterministic accounting across providers**
 
 ---
 
@@ -20,8 +21,9 @@ Select the best initial compute provider integration strategy for Agentic Financ
 
 1. **Financed dedicated compute capacity** (instance-backed, longer-lived)
 2. **Financed burst inference execution** (job/serverless-backed)
+3. **Financed managed API inference** (key-scoped credit-backed usage)
 
-A single provider is unlikely to dominate both surfaces.
+A single provider is unlikely to dominate all three surfaces.
 
 ---
 
@@ -29,13 +31,14 @@ A single provider is unlikely to dominate both surfaces.
 
 | Criterion | Weight |
 |---|---:|
-| Lifecycle API control (provision, inspect, terminate) | 20 |
+| Lifecycle API control (provision, inspect, terminate/revoke) | 20 |
 | Billing determinism (price/usage visibility for debt accounting) | 20 |
 | Capacity reliability / availability | 15 |
-| Serverless job semantics | 15 |
-| Security/network controls | 10 |
+| Burst/serverless semantics | 10 |
+| Managed API inference ergonomics | 10 |
+| Security controls (key scope, limits, expiry, revocation) | 10 |
 | Operational maturity (error model, docs, rate limits) | 10 |
-| Lock-in risk / portability | 10 |
+| Lock-in risk / portability | 5 |
 | **Total** | **100** |
 
 Scoring scale: **1 (poor) → 5 (excellent)**.
@@ -70,7 +73,22 @@ Weaknesses:
 Score profile:
 - Best for: **financed burst inference execution**
 
-## 4.3 Modal
+## 4.3 Venice
+
+Strengths:
+- OpenAI-compatible inference API with broad model catalog
+- Key lifecycle endpoints (`create/update/delete`) support per-agreement scoped access
+- Billing telemetry endpoints support deterministic metering and reconciliation
+- Supports managed API inference without instance orchestration overhead
+
+Weaknesses:
+- API-credit inference model is a different surface than dedicated infrastructure ownership
+- Requires strict normalization from provider billing rows to canonical unit schema
+
+Score profile:
+- Best for: **financed managed API inference**
+
+## 4.4 Modal
 
 Strengths:
 - Excellent developer experience and serverless orchestration
@@ -83,7 +101,7 @@ Weaknesses:
 Score profile:
 - Best for: optional orchestration layer, not first canonical provider rail
 
-## 4.4 Vast
+## 4.5 Vast
 
 Strengths:
 - Large marketplace supply and API-based provisioning
@@ -106,7 +124,8 @@ There is no single provider that is best for all compute financing products.
 
 - **Primary rail (Phase 1): Lambda adapter** for financed dedicated instances
 - **Secondary rail (Phase 2): RunPod adapter** for financed burst/serverless inference
-- Keep both behind one canonical compute adapter boundary
+- **Tertiary rail (Phase 3): Venice adapter** for financed API-based inference
+- Keep all rails behind one canonical compute adapter boundary
 
 This satisfies no-lock-in while matching each provider to its strongest product surface.
 
@@ -119,7 +138,7 @@ Define canonical compute adapter interface and event schema:
 - quote
 - allocate/provision
 - usage/metering pull
-- release/terminate
+- release/terminate/revoke
 - error normalization
 
 ### Phase 1 — LambdaComputeAdapter (primary)
@@ -133,10 +152,18 @@ Implement burst/serverless financing path:
 - sync/async settlement mapping
 - bounded TTL and retry semantics into debt model
 
-### Phase 3 — Router + policy scheduler
+### Phase 3 — VeniceComputeAdapter (managed API inference)
+Implement key-scoped inference financing path:
+- per-agreement API key create/update/delete
+- consumption limits + expiry tied to agreement policy
+- billing/usage normalization into canonical unit types
+- revoke/limit-clamp kill switch on delinquency/default
+
+### Phase 4 — Router + policy scheduler
 Route by agreement policy:
 - `DedicatedCapacity` -> Lambda first
 - `BurstInference` -> RunPod first
+- `ApiCreditInference` -> Venice first
 - fallback path only through approved adapter allowlist
 
 ---
@@ -147,8 +174,9 @@ Must pass before mainnet release:
 
 - [ ] Native financing accounting remains correct when any provider adapter is disabled
 - [ ] Differential tests show identical core debt/accounting outcomes across >=2 provider adapters for equivalent workloads
+- [ ] At least one differential suite includes API-based inference adapter (Venice) vs non-Venice adapter trace replay
 - [ ] Provider-specific metadata is never required to reconstruct canonical agreement state
-- [ ] Provider swap (Lambda <-> RunPod) requires no storage migration in core contracts
+- [ ] Provider swap (Lambda/RunPod/Venice) requires no storage migration in core contracts
 
 ---
 
@@ -156,6 +184,7 @@ Must pass before mainnet release:
 
 - Default dedicated-capacity provider: **Lambda**
 - Default burst-inference provider: **RunPod**
+- Default API-credit inference provider: **Venice**
 - Provider routing is governance-configurable and reversible
 - Any provider-level fail-open behavior is forbidden; all failures must resolve to explicit agreement state transitions
 
@@ -169,4 +198,4 @@ Must pass before mainnet release:
 
 ---
 
-**End of Draft v0.1**
+**End of Draft v0.2**
